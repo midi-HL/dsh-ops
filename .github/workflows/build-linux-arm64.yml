@@ -84,16 +84,26 @@ jobs:
         run: node bin/native-runtime.mjs check --platform "$TARGET_NAME"
 
       - name: Smoke-test the worker under qemu-user
-        # One real `stat` call through the versioned envelope. qemu-user is only a
-        # build-time sanity check that the aarch64 ELF runs; the real acceptance
-        # test is on the PRoot aarch64 host.
+        # Real calls through the versioned envelope against the aarch64 sysroot.
+        # qemu-user is only a build-time sanity check that the aarch64 ELF runs;
+        # the real acceptance test is on the PRoot aarch64 host.
         run: |
           sudo apt-get install -y --no-install-recommends qemu-user-static
-          printf '%s' '{"version":1,"requestId":"ci-smoke","component":"file","budget":{"timeoutMs":30000,"maxBytes":131072},"request":{"root":"/etc","scope":"ci","tool":"stat","args":{"path":"/etc/hostname"},"read_only":true}}' > /tmp/req.json
+          SYSROOT=/usr/aarch64-linux-gnu
+          ls "$SYSROOT/etc" | head
+          cat > /tmp/stat.json <<'JSON'
+          {"version":1,"requestId":"ci-stat","component":"file","budget":{"timeoutMs":30000,"maxBytes":131072},"request":{"root":"/etc","scope":"ci","tool":"stat","args":{"path":"/etc/os-release"},"read_only":true}}
+          JSON
+          cat > /tmp/glob.json <<'JSON'
+          {"version":1,"requestId":"ci-glob","component":"file","budget":{"timeoutMs":30000,"maxBytes":131072},"request":{"root":"/etc","scope":"ci","tool":"glob","args":{"pattern":"/etc/*release*"},"read_only":true}}
+          JSON
           echo '--- --version ---'
-          qemu-aarch64-static -L /usr/aarch64-linux-gnu runtime/$TARGET_NAME/dsh-ops-worker --version
-          echo '--- stat /etc/hostname ---'
-          qemu-aarch64-static -L /usr/aarch64-linux-gnu runtime/$TARGET_NAME/dsh-ops-worker < /tmp/req.json | head -c 2000
+          qemu-aarch64-static -L "$SYSROOT" runtime/$TARGET_NAME/dsh-ops-worker --version
+          echo '--- stat /etc/os-release ---'
+          qemu-aarch64-static -L "$SYSROOT" runtime/$TARGET_NAME/dsh-ops-worker < /tmp/stat.json | head -c 2000
+          echo
+          echo '--- glob /etc/*release* ---'
+          qemu-aarch64-static -L "$SYSROOT" runtime/$TARGET_NAME/dsh-ops-worker < /tmp/glob.json | head -c 2000
           echo
 
       - name: Record digests in the run summary
