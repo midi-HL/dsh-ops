@@ -43,9 +43,25 @@ jobs:
           node-version: '24'
 
       - name: Install aarch64 cross linker
+        # Bounded and retried: a stuck apt mirror on a shared runner must fail the
+        # step, not hang the job. The cross linker is the only native dependency.
+        timeout-minutes: 10
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          for attempt in 1 2 3; do
+            echo "apt attempt $attempt"
+            if sudo -E apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
+                 -o Acquire::https::Timeout=30 \
+                 update -qq \
+               && sudo -E apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
+                 install -y --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross; then
+              break
+            fi
+            [ "$attempt" = 3 ] && { echo "apt failed after 3 attempts" >&2; exit 1; }
+            sleep 10
+          done
+          aarch64-linux-gnu-gcc --version | head -1
 
       - name: Set up pinned Rust
         shell: bash
@@ -87,8 +103,12 @@ jobs:
         # Real calls through the versioned envelope against the aarch64 sysroot.
         # qemu-user is only a build-time sanity check that the aarch64 ELF runs;
         # the real acceptance test is on the PRoot aarch64 host.
+        timeout-minutes: 10
         run: |
-          sudo apt-get install -y --no-install-recommends qemu-user-static
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          sudo -E apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 \
+            install -y --no-install-recommends qemu-user-static
           SYSROOT=/usr/aarch64-linux-gnu
           ls "$SYSROOT/etc" | head
           cat > /tmp/stat.json <<'JSON'
